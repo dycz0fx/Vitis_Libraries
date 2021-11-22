@@ -55,4 +55,8 @@ if {$VIVADO_IMPL == 1} {
   export_design -flow impl -rtl verilog
 }
 
+if {$EXPORT_ZIP == 1} {
+  export_design -rtl verilog -format ip_catalog -vendor "PL" -display_name "gzipd_fixed" -taxonomy "/hls" -output ./gzipd_fixed.zip
+}
+
 exit

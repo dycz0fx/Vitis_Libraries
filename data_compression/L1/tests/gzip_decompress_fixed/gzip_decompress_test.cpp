@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+#include "/proj/gw/Xilinx/Vitis_HLS/2020.2/include/gmp.h"
 #include "hls_stream.h"
 #include <ap_int.h>
 #include <assert.h>
@@ -51,6 +51,38 @@ void gzipMultiByteDecompressEngineRun(hls::stream<in_t>& inStream,
 
     xf::compression::details::inflateMultiByteCore<c_decoderType, MULTIPLE_BYTES, LL_MODEL, HISTORY_SIZE>(
         inStream, inEos, outStream);
+}
+
+// read_input(): Read Data from Global Memory and write into Stream inStream
+static void read_input(uint8_t* input, hls::stream<in_t>& inStream, hls::stream<bool>& inEos, unsigned long size) 
+{
+    for (int i = 0; i < size; i += sizeof_in) {
+        in_t tmpVal;
+        memcpy((void *)&tmpVal, input + i, sizeof_in);
+        inStream << tmpVal;
+        inEos << 0;
+    }
+    inStream << 0;
+    inEos << 1;
+}
+
+void gzipd(uint8_t *base, unsigned long input_offset, unsigned long output_offset, unsigned long size)
+{
+#pragma HLS INTERFACE m_axi port=base offset=off bundle=gmem depth=4194304
+
+    hls::stream<in_t> inStream("inStream");
+    hls::stream<bool> inEos("inEos");
+    hls::stream<ap_uint<OUT_BITWIDTH + strbSize> > outStream("decompressOut");
+    // offset output
+    uint8_t *input = base + input_offset;
+	uint8_t *output = base + output_offset;
+
+    // read data from input array to input stream inStream
+    read_input(input, inStream, inEos, size);
+    // DECOMPRESSION CALL
+    gzipMultiByteDecompressEngineRun(inStream, inEos, outStream);
+    // write data from stream to output array
+    write_output(output, outStream);
 }
 
 void validateFile(std::string& fileName, std::string& originalFileName) {

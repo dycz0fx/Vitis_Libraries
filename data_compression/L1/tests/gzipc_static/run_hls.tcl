@@ -33,7 +33,7 @@ add_files -tb $XF_PROJ_ROOT/common/libs/logger/logger.cpp -cflags "-I${XF_PROJ_R
 add_files -tb $XF_PROJ_ROOT/common/libs/cmdparser/cmdlineparser.cpp -cflags "-I${XF_PROJ_ROOT}/common/libs/cmdparser -I${XF_PROJ_ROOT}/common/libs/logger -DSTATIC_MODE"
 add_files -tb gzip_compress_test.cpp -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -I${XF_PROJ_ROOT}/L2/include -I${XF_PROJ_ROOT}/common/libs/cmdparser -I${XF_PROJ_ROOT}/../security/L1/include -DGZIP_STREAM -DSTATIC_MODE"
 
-set_top gzipcMulticoreStreaming
+set_top gzipc
 
 open_solution -reset $SOLN
 
@@ -42,7 +42,7 @@ create_clock -period $CLKP
 config_dataflow -start_fifo_depth 32 -scalar_fifo_depth 32 -task_level_fifo_depth 32
 
 if {$CSIM == 1} {
-  csim_design -argv "${DESIGN_PATH}/sample.txt ${DESIGN_PATH}/sample.txt.gz"
+  csim_design
 }
 
 if {$CSYNTH == 1} {
@@ -50,7 +50,7 @@ if {$CSYNTH == 1} {
 }
 
 if {$COSIM == 1} {
-  cosim_design -disable_dependency_check -O -argv "${DESIGN_PATH}/sample.txt ${DESIGN_PATH}/sample.txt.gz"
+  cosim_design -disable_dependency_check -O
 }
 
 if {$VIVADO_SYN == 1} {
@@ -61,4 +61,7 @@ if {$VIVADO_IMPL == 1} {
   export_design -flow impl -rtl verilog
 }
 
+if {$EXPORT_ZIP == 1} {
+  export_design -rtl verilog -format ip_catalog -vendor "PL" -display_name "gzipc_static" -taxonomy "/hls" -output ./gzipc_static.zip
+}
 exit

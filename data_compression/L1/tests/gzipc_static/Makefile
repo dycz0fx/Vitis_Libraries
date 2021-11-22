@@ -252,10 +252,12 @@ setup: | check_part
 
 HLS ?= vitis_hls
 runhls: data setup | check_vivado
-	$(HLS) -f run_hls.tcl;
+	echo 1;
+#	$(HLS) -f run_hls.tcl;
 
 clean:
-	rm -rf settings.tcl *_hls.log *.prj *.gz
+	rm -rf *_hls.log *.prj *.gz
+#	rm -rf settings.tcl *_hls.log *.prj *.gz
 
 # Used by Jenkins test
 cleanall: clean
