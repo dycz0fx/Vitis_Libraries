@@ -18,6 +18,7 @@
 #include <iostream>
 #include <stdlib.h>
 #include <string>
+#include <string.h>
 #include <ap_int.h>
 #include <assert.h>
 #include <stdint.h>
@@ -61,8 +62,11 @@ void snappyCompressEngineRun(hls::stream<uintV_t>& inStream,
 #pragma HLS STREAM variable = bestMatchStream depth = 8
 #pragma HLS STREAM variable = boosterStream depth = 8
 
-#pragma HLS RESOURCE variable = compressdStream core = FIFO_SRL
-#pragma HLS RESOURCE variable = boosterStream core = FIFO_SRL
+#pragma HLS BIND_STORAGE variable = inStream type = FIFO impl = SRL
+#pragma HLS BIND_STORAGE variable = outStream type = FIFO impl = SRL
+
+// #pragma HLS RESOURCE variable = compressdStream core = FIFO_SRL
+// #pragma HLS RESOURCE variable = boosterStream core = FIFO_SRL
 
 #pragma HLS dataflow
 
@@ -73,62 +77,120 @@ void snappyCompressEngineRun(hls::stream<uintV_t>& inStream,
         boosterStream, snappyOut, max_lit_limit, input_size, snappyOut_eos, snappyOutSize, core_idx);
 }
 
-int main(int argc, char* argv[]) {
+static void read_input(uint8_t* input, hls::stream<uintV_t>& inStream, unsigned long size) 
+{
+    for (int i = 0; i < size; i++) {
+        inStream << input[i];
+    }
+}
+
+static void write_output(uint8_t* output, hls::stream<uintV_t>& outStream, hls::stream<bool>& outStream_eos, hls::stream<uint32_t>& sizeStream)
+{
+    // TODO:
+    //  outputFile << input_size change to ((uint32_t *)output)[0] = input_size 
+    uint32_t size = sizeStream.read();
+    ((uint32_t *)output)[0] = size;
+    bool eos_flag = false;
+    // the first 4 bytes are the size
+    for (int i = 0; i < size + 1; i++) {
+        output[i] = outStream.read();
+        eos_flag = outStream_eos.read();
+    }
+}
+
+void snappy_compress(uint8_t *base, unsigned long input_offset, unsigned long output_offset, unsigned long size)
+{
+#pragma HLS INTERFACE m_axi port=base offset=off bundle=gmem depth=4194304
+    // offset output
+    uint8_t *input = base + input_offset;
+	uint8_t *output = base + output_offset;
+
     hls::stream<uintV_t> bytestr_in("compressIn");
     hls::stream<uintV_t> bytestr_out("compressOut");
 
-    hls::stream<bool> snappyOut_eos;
-    hls::stream<uint32_t> snappyOutSize;
+    hls::stream<bool> snappyOut_eos("compressOut_eos");
+    hls::stream<uint32_t> snappyOutSize("compressOut_size");
     uint32_t max_lit_limit[PARALLEL_BLOCK];
-    uint32_t input_size;
     uint32_t core_idx;
 
-    std::ifstream inputFile;
-    std::fstream outputFile;
+    // read data from input array to input stream bytestr_in
+    read_input(input, bytestr_in, size);
+    // compression
+    snappyCompressEngineRun(bytestr_in, bytestr_out, snappyOut_eos, snappyOutSize, max_lit_limit, size, 0);
+    // write data from stream to output array
+    write_output(output, bytestr_out, snappyOut_eos, snappyOutSize);
+    output[0] = '1';
+    output[1] = '1';
+    output[2] = '2';
+    output[3] = '2';
+    output[4] = '3';
+    output[5] = '3';
+    input[0] = '3';
+    input[1] = '3';
+    input[2] = '2';
+    input[3] = '2';
+    input[4] = '1';
+    input[5] = '1';
+}
 
-    inputFile.open(argv[1], std::ofstream::binary | std::ofstream::in);
-    if (!inputFile.is_open()) {
-        std::cout << "Cannot open the input file!!" << std::endl;
-        exit(0);
+int main(int argc, char* argv[]) {
+    const char *text =
+        "To evaluate our prefetcher we modelled the system using the gem5 simulator [4] in full system mode with the setup "
+        "given in table 2 and the ARMv8 64-bit instruction set. Our applications are derived from existing benchmarks and "
+        "libraries for graph traversal, using a range of graph sizes and characteristics. We simulate the core breadth-first search "
+        "based kernels of each benchmark, skipping the graph construction phase. Our first benchmark is from the Graph 500 community [32]. "
+        "We used their Kronecker graph generator for both the standard Graph 500 search benchmark and a connected components "
+        "calculation. The Graph 500 benchmark is designed to represent data analytics workloads, such as 3D physics "
+        "simulation. Standard inputs are too long to simulate, so we create smaller graphs with scales from 16 to 21 and edge "
+        "factors from 5 to 15 (for comparison, the Graph 500 toy input has scale 26 and edge factor 16). "
+        "Our prefetcher is most easily incorporated into libraries that implement graph traversal for CSR graphs. To this "
+        "end, we use the Boost Graph Library (BGL) [41], a C++ templated library supporting many graph-based algorithms "
+        "and graph data structures. To support our prefetcher, we added configuration instructions on constructors for CSR "
+        "data structures, circular buffer queues (serving as the work list) and colour vectors (serving as the visited list). This "
+        "means that any algorithm incorporating breadth-first searches on CSR graphs gains the benefits of our prefetcher without "
+        "further modification. We evaluate breadth-first search, betweenness centrality and ST connectivity which all traverse "
+        "graphs in this manner. To evaluate our extensions for sequential access prefetching (section 3.5) we use PageRank "
+        "and sequential colouring. Inputs to the BGL algorithms are a set of real world "
+        "graphs obtained from the SNAP dataset [25] chosen to represent a variety of sizes and disciplines, as shown in table 4. "
+        "All are smaller than what we might expect to be processing in a real system, to enable complete simulation in a realistic "
+        "time-frame, but as figure 2(a) shows, since stall rates go up for larger data structures, we expect the improvements we "
+        "attain in simulation to be conservative when compared with real-world use cases.";
+
+    size_t size = strlen(text);
+    printf("size:%d\n", size);
+
+    char *buf = (char *)malloc(3 * 1024 * 1024); // 3MB buffer
+    memcpy(buf, (const uint8_t *)text, size);    // copy to internal buff
+    char *input = buf;
+    char *compressed = buf + 1048576;
+    int j = 0;
+    std::cout << std::endl
+         << "before compression: " << std::endl
+         << std::endl;
+    for (j = 0; j < size; j++)
+    {
+        std::cout << input[j];
     }
-    inputFile.seekg(0, std::ios::end);
-    uint32_t fileSize = inputFile.tellg();
-    inputFile.seekg(0, std::ios::beg);
-    input_size = fileSize;
-    uint32_t p = fileSize;
+    std::cout << std::endl
+         << std::endl;
 
-    while (p--) {
-        uint8_t x;
-        inputFile.read((char*)&x, 1);
-        bytestr_in << x;
+    unsigned long new_size = size;
+    snappy_compress((uint8_t *)input, input - input, compressed - input, size);
+
+    std::cout << std::endl
+         << "after compression:" << std::endl
+         << std::endl;
+    for (j = 0; j < size; j++)
+    {
+        std::cout << input[j];
     }
-    inputFile.close();
+    std::cout << std::endl
+         << std::endl;
 
-    // COMPRESSION CALL
-    snappyCompressEngineRun(bytestr_in, bytestr_out, snappyOut_eos, snappyOutSize, max_lit_limit, input_size, 0);
-
-    uint32_t outsize;
-    outsize = snappyOutSize.read();
-    std::cout << "------- Compression Ratio: " << (float)fileSize / outsize << " -------" << std::endl;
-
-    outputFile.open(argv[2], std::fstream::binary | std::fstream::out);
-    if (!outputFile.is_open()) {
-        std::cout << "Cannot open the output file!!" << std::endl;
-        exit(0);
+    for (j = 0; j < new_size; j++)
+    {
+        std::cout << compressed[j];
     }
-
-    outputFile << input_size;
-
-    bool eos_flag = snappyOut_eos.read();
-    while (outsize > 0) {
-        while (!eos_flag) {
-            uint8_t w = bytestr_out.read();
-            eos_flag = snappyOut_eos.read();
-            outputFile.write((char*)&w, 1);
-            outsize--;
-        }
-        if (!eos_flag) outsize = snappyOutSize.read();
-    }
-    uint8_t w = bytestr_out.read();
-    outputFile.close();
+    std::cout << std::endl
+         << std::endl;
 }

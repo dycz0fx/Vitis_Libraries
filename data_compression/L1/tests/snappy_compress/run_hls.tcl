@@ -28,7 +28,7 @@ open_project -reset $PROJ
 
 add_files "snappy_compress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw"
 add_files -tb "snappy_compress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw"
-set_top snappyCompressEngineRun
+set_top snappy_compress
 
 open_solution -reset $SOLN
 
@@ -38,7 +38,7 @@ set_part $XPART
 create_clock -period $CLKP
 
 if {$CSIM == 1} {
-  csim_design -argv "${DESIGN_PATH}/sample.txt ${DESIGN_PATH}/sample.txt.encoded"
+  csim_design
 }
 
 if {$CSYNTH == 1} {
@@ -46,7 +46,7 @@ if {$CSYNTH == 1} {
 }
 
 if {$COSIM == 1} {
-  cosim_design -argv "${DESIGN_PATH}/sample.txt ${DESIGN_PATH}/sample.txt.encoded"
+  cosim_design
 }
 
 if {$VIVADO_SYN == 1} {
@@ -55,6 +55,10 @@ if {$VIVADO_SYN == 1} {
 
 if {$VIVADO_IMPL == 1} {
   export_design -flow impl -rtl verilog
+}
+
+if {$EXPORT_ZIP == 1} {
+  export_design -rtl verilog -format ip_catalog -vendor "PL" -display_name "snappy_compress" -taxonomy "/hls" -output ./snappy_compress.zip
 }
 
 exit

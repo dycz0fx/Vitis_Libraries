@@ -41,6 +41,57 @@ void snappyDecompressEngineRun(hls::stream<uintS_t>& inStream,
                                                                           outSizeStream, input_size);
 }
 
+static void read_input(uint8_t* input, hls::stream<uintS_t>& inStream, uint32_t comp_length) 
+{
+    for (uint32_t i = 4; i < comp_length; i += MULTIPLE_BYTES) {
+        uintS_t x = ((uinS_t *)input)[i];
+        inStream << x;
+    }
+}
+
+static void write_output(uint8_t* output, hls::stream<uintS_t>& outStream, hls::stream<bool>& outStreamEoS, hls::stream<uint32_t>& outStreamSize)
+{
+    uint32_t outSize = outStreamSize.read();
+    uint32_t outCnt = 0;
+    uintS_t g;
+    for (bool outEoS = outStreamEoS.read(); outEoS == 0; outEoS = outStreamEoS.read()) {
+        // reading value from output stream
+        uintS_t o = outStream.read();
+
+        // writing output file
+        if (outCnt + MULTIPLE_BYTES < outSize) {
+            (uintS_t)(output[outCnt]) = o;
+            outCnt += MULTIPLE_BYTES;
+        } else {
+            (uintS_t)(output[outCnt]) = o;
+            outCnt = outSize;
+        }
+
+    }
+    uintS_t o = outStream.read();
+}
+
+void snappy_decompress(uint8_t *base, unsigned long input_offset, unsigned long output_offset, unsigned long size)
+{
+#pragma HLS INTERFACE m_axi port=base offset=off bundle=gmem depth=4194304
+    // offset output
+    uint8_t *input = base + input_offset;
+	uint8_t *output = base + output_offset;
+
+    uint32_t comp_length = ((uint32_t *)input)[0] + 4;
+    hls::stream<uintS_t> inStream("inStream");
+    hls::stream<uintS_t> outStream("decompressOut");
+    hls::stream<bool> outStreamEoS("decompressOut");
+    hls::stream<uint32_t> outStreamSize("decompressOut");
+
+    // read data from input array to input stream bytestr_in
+    read_input(input, inStream, comp_length);
+    // decompression
+    snappyDecompressEngineRun(inStream, outStream, outStreamEoS, outStreamSize, comp_length);
+    // write data from stream to output array
+    write_output(output, outStream, outStreamEoS, outStreamSize);
+}
+
 int main(int argc, char* argv[]) {
     hls::stream<uintS_t> inStream("inStream");
     hls::stream<bool> inStreamEos("inStreamEos");
