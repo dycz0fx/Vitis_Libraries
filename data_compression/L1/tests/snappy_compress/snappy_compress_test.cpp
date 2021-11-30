@@ -28,6 +28,8 @@
 #include "lz_compress.hpp"
 #include "lz_optional.hpp"
 #include "snappy_compress.hpp"
+#include "axi_to_stream.hpp"
+#include "stream_to_axi.hpp"
 
 #define PARALLEL_BLOCK 1
 #ifdef LARGE_LIT_RANGE
@@ -49,8 +51,8 @@ typedef ap_uint<8> uintV_t;
 
 void snappyCompressEngineRun(hls::stream<uintV_t>& inStream,
                              hls::stream<uintV_t>& snappyOut,
-                             hls::stream<bool>& snappyOut_eos,
-                             hls::stream<uint32_t>& snappyOutSize,
+                             hls::stream<bool>& byte_out_eos,
+                             hls::stream<uint32_t>& byte_out_size,
                              uint32_t max_lit_limit[PARALLEL_BLOCK],
                              uint32_t input_size,
                              uint32_t core_idx) {
@@ -69,33 +71,22 @@ void snappyCompressEngineRun(hls::stream<uintV_t>& inStream,
 // #pragma HLS RESOURCE variable = boosterStream core = FIFO_SRL
 
 #pragma HLS dataflow
-
+    
     xf::compression::lzCompress<MATCH_LEN, c_minMatch, LZ_MAX_OFFSET_LIMIT>(inStream, compressdStream, input_size);
     xf::compression::lzBestMatchFilter<MATCH_LEN, OFFSET_WINDOW>(compressdStream, bestMatchStream, input_size);
     xf::compression::lzBooster<MAX_MATCH_LEN>(bestMatchStream, boosterStream, input_size);
     xf::compression::snappyCompress<MAX_LIT_COUNT, MAX_LIT_STREAM_SIZE, PARALLEL_BLOCK>(
-        boosterStream, snappyOut, max_lit_limit, input_size, snappyOut_eos, snappyOutSize, core_idx);
+        boosterStream, snappyOut, max_lit_limit, input_size, byte_out_eos, byte_out_size, core_idx);
 }
 
-static void read_input(uint8_t* input, hls::stream<uintV_t>& inStream, unsigned long size) 
+static void read_input(uint8_t* input, hls::stream<uintV_t>& inStream, hls::stream<bool>& inStream_eos, unsigned long size) 
 {
-    for (int i = 0; i < size; i++) {
-        inStream << input[i];
-    }
+    xf::common::utils_hw::axiToStream<8>((ap_uint<8> *)input, size, inStream, inStream_eos);
 }
 
 static void write_output(uint8_t* output, hls::stream<uintV_t>& outStream, hls::stream<bool>& outStream_eos, hls::stream<uint32_t>& sizeStream)
 {
-    // TODO:
-    //  outputFile << input_size change to ((uint32_t *)output)[0] = input_size 
-    uint32_t size = sizeStream.read();
-    ((uint32_t *)output)[0] = size;
-    bool eos_flag = false;
-    // the first 4 bytes are the size
-    for (int i = 0; i < size + 1; i++) {
-        output[i] = outStream.read();
-        eos_flag = outStream_eos.read();
-    }
+    xf::common::utils_hw::streamToAxi<8>((ap_uint<8> *)output, outStream, outStream_eos);
 }
 
 void snappy_compress(uint8_t *base, unsigned long input_offset, unsigned long output_offset, unsigned long size)
@@ -105,20 +96,25 @@ void snappy_compress(uint8_t *base, unsigned long input_offset, unsigned long ou
     uint8_t *input = base + input_offset;
 	uint8_t *output = base + output_offset;
 
-    hls::stream<uintV_t> bytestr_in("compressIn");
-    hls::stream<uintV_t> bytestr_out("compressOut");
-
-    hls::stream<bool> snappyOut_eos("compressOut_eos");
-    hls::stream<uint32_t> snappyOutSize("compressOut_size");
+    hls::stream<uintV_t> byte_in("compressIn");
+    hls::stream<bool> byte_in_eos("compressIn_eos");
+    hls::stream<uintV_t> byte_out("compressOut");
+    hls::stream<bool> byte_out_eos("compressOut_eos");
+    hls::stream<uint32_t> byte_out_size("compressOut_size");
     uint32_t max_lit_limit[PARALLEL_BLOCK];
     uint32_t core_idx;
 
-    // read data from input array to input stream bytestr_in
-    read_input(input, bytestr_in, size);
+    // read data from input array to input stream byte_in
+    read_input(input, byte_in, byte_in_eos, size);
     // compression
-    snappyCompressEngineRun(bytestr_in, bytestr_out, snappyOut_eos, snappyOutSize, max_lit_limit, size, 0);
+    snappyCompressEngineRun(byte_in, byte_out, byte_out_eos, byte_out_size, max_lit_limit, size, 0);
     // write data from stream to output array
-    write_output(output, bytestr_out, snappyOut_eos, snappyOutSize);
+    unsigned long new_size = byte_out_size.read();
+    write_output(output, byte_out, byte_out_eos, byte_out_size);
+    while(!byte_in_eos.read()) {
+    }
+    // read byte_out to avoid this --- WARNING: Hls::stream 'compressOut' contains leftover data, which may result in RTL simulation hanging.
+    uintV_t temp = byte_out.read();
     output[0] = '1';
     output[1] = '1';
     output[2] = '2';

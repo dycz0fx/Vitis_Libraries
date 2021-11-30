@@ -26,8 +26,8 @@ if {![info exists CLKP]} {
 
 open_project -reset $PROJ
 
-add_files "snappy_compress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw"
-add_files -tb "snappy_compress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw"
+add_files "snappy_compress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -I${UTILS_ROOT}/L1/include/xf_utils_hw -I${UTILS_ROOT}/L1/include" 
+add_files -tb "snappy_compress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -I${UTILS_ROOT}/L1/include/xf_utils_hw -I${UTILS_ROOT}/L1/include"
 set_top snappy_compress
 
 open_solution -reset $SOLN

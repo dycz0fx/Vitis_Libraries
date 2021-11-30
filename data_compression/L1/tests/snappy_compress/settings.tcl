@@ -7,3 +7,4 @@ set VIVADO_IMPL 0
 set EXPORT_ZIP 1
 set XF_PROJ_ROOT "/misc/gw/home/luoxi/Programs/Vitis_Libraries_19.2/data_compression/"
 set CUR_DIR "/misc/gw/home/luoxi/Programs/Vitis_Libraries_19.2/data_compression/L1/tests/snappy_compress"
+set UTILS_ROOT "/misc/gw/home/luoxi/Programs/Vitis_Libraries_19.2/utils/"
