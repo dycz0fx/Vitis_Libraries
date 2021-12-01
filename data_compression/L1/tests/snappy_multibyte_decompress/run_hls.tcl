@@ -23,8 +23,8 @@ set CLKP 3.3
 open_project -reset $PROJ
 
 # Add design and testbench files
-add_files snappy_decompress_test.cpp -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -DMULTIPLE_BYTES=8"
-add_files -tb snappy_decompress_test.cpp -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -DMULTIPLE_BYTES=8"
+add_files snappy_decompress_test.cpp -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -I${UTILS_ROOT}/L1/include/xf_utils_hw -I${UTILS_ROOT}/L1/include -DMULTIPLE_BYTES=8"
+add_files -tb snappy_decompress_test.cpp -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -I${UTILS_ROOT}/L1/include/xf_utils_hw -I${UTILS_ROOT}/L1/include -DMULTIPLE_BYTES=8"
 
 # Set the top-level function
 set_top snappyDecompressEngineRun
@@ -37,7 +37,7 @@ set_part {xcu200}
 create_clock -period $CLKP
 
 if {$CSIM == 1} {
-  csim_design -O -argv "${XF_PROJ_ROOT}/L1/tests/snappy_multibyte_decompress/sample.txt.snappy ${XF_PROJ_ROOT}/L1/tests/snappy_multibyte_decompress/sample.txt.snappy.out ${XF_PROJ_ROOT}/L1/tests/snappy_multibyte_decompress/sample.txt"
+  csim_design -O -argv "${XF_PROJ_ROOT}/L1/tests/snappy_compress/sample.txt.encoded ${XF_PROJ_ROOT}/L1/tests/snappy_multibyte_decompress/sample.txt.snappy.out ${XF_PROJ_ROOT}/L1/tests/snappy_multibyte_decompress/sample.txt"
 }
 
 if {$CSYNTH == 1} {
@@ -45,7 +45,7 @@ if {$CSYNTH == 1} {
 }
 
 if {$COSIM == 1} {
-  cosim_design -O -argv "${XF_PROJ_ROOT}/L1/tests/snappy_decompress/sample.txt.snappy ${XF_PROJ_ROOT}/L1/tests/snappy_multibyte_decompress/sample.txt.snappy.out ${XF_PROJ_ROOT}/L1/tests/snappy_multibyte_decompress/sample.txt" 
+  cosim_design -O -argv "${XF_PROJ_ROOT}/L1/tests/snappy_compress/sample.txt.encoded ${XF_PROJ_ROOT}/L1/tests/snappy_multibyte_decompress/sample.txt.snappy.out ${XF_PROJ_ROOT}/L1/tests/snappy_multibyte_decompress/sample.txt" 
 }
 
 if {$VIVADO_SYN == 1} {
@@ -59,4 +59,9 @@ if {$VIVADO_IMPL == 1} {
 if {$QOR_CHECK == 1} {
   puts "QoR check not implemented yet"
 }
+
+if {$EXPORT_ZIP == 1} {
+  export_design -rtl verilog -format ip_catalog -vendor "PL" -display_name "snappy_decompress" -taxonomy "/hls" -output ./snappy_decompress.zip
+}
+
 exit

@@ -38,7 +38,7 @@ set_part $XPART
 create_clock -period $CLKP
 
 if {$CSIM == 1} {
-  csim_design
+  csim_design -argv "${DESIGN_PATH}/sample.txt ${DESIGN_PATH}/sample.txt.encoded"
 }
 
 if {$CSYNTH == 1} {
@@ -46,7 +46,7 @@ if {$CSYNTH == 1} {
 }
 
 if {$COSIM == 1} {
-  cosim_design
+  cosim_design -argv "${DESIGN_PATH}/sample.txt ${DESIGN_PATH}/sample.txt.encoded"
 }
 
 if {$VIVADO_SYN == 1} {

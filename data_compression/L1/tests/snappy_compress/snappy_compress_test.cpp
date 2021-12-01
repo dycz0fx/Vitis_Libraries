@@ -32,6 +32,8 @@
 #include "axi_to_stream.hpp"
 #include "stream_to_axi.hpp"
 
+#define MULTIPLE_BYTES 1
+
 #define PARALLEL_BLOCK 1
 #ifdef LARGE_LIT_RANGE
 #define MAX_LIT_COUNT 4090
@@ -51,9 +53,9 @@ const int c_snappyMaxLiteralStream = MAX_LIT_STREAM_SIZE;
 typedef ap_uint<8> uintV_t;
 
 void snappyCompressEngineRun(hls::stream<uintV_t>& inStream,
-                             hls::stream<uintV_t>& snappyOut,
-                             hls::stream<bool>& byte_out_eos,
-                             hls::stream<uint32_t>& byte_out_size,
+                             hls::stream<uintV_t>& outStream,
+                             hls::stream<bool>& outStream_eos,
+                             hls::stream<uint32_t>& outStream_size,
                              uint32_t max_lit_limit[PARALLEL_BLOCK],
                              uint32_t input_size,
                              uint32_t core_idx) {
@@ -77,117 +79,150 @@ void snappyCompressEngineRun(hls::stream<uintV_t>& inStream,
     xf::compression::lzBestMatchFilter<MATCH_LEN, OFFSET_WINDOW>(compressdStream, bestMatchStream, input_size);
     xf::compression::lzBooster<MAX_MATCH_LEN>(bestMatchStream, boosterStream, input_size);
     xf::compression::snappyCompress<MAX_LIT_COUNT, MAX_LIT_STREAM_SIZE, PARALLEL_BLOCK>(
-        boosterStream, snappyOut, max_lit_limit, input_size, byte_out_eos, byte_out_size, core_idx);
+        boosterStream, outStream, max_lit_limit, input_size, outStream_eos, outStream_size, core_idx);
 }
 
-static void read_input(uint8_t* input, hls::stream<uintV_t>& inStream, hls::stream<bool>& inStream_eos, unsigned long size) 
+static void read_input_xilinx(uint8_t* input, hls::stream<uintV_t>& inStream, unsigned long input_size) 
 {
-    xf::common::utils_hw::axiToStream<8>((ap_uint<8> *)input, size, inStream, inStream_eos);
+    hls::stream<bool> inStream_eos("compressIn_eos");
+    xf::common::utils_hw::axiToStream<8>((ap_uint<8> *)input, input_size, inStream, inStream_eos);
+    while(!inStream_eos.read()) {
+    }
 }
 
-static void write_output(uint8_t* output, hls::stream<uintV_t>& outStream, hls::stream<bool>& outStream_eos, hls::stream<uint32_t>& sizeStream)
+static void write_output_xilinx(uint8_t* output, hls::stream<uintV_t>& outStream, hls::stream<bool>& outStream_eos, uint32_t new_size)
 {
     xf::common::utils_hw::streamToAxi<8>((ap_uint<8> *)output, outStream, outStream_eos);
 }
 
-void snappy_compress(uint8_t *base, unsigned long input_offset, unsigned long output_offset, unsigned long size)
+static void read_input(uint8_t* input, hls::stream<uintV_t>& inStream, unsigned long input_size) 
+{
+    std::cout << "read_input: " << std::to_string(input_size) << std::endl;
+    for (int i = 0; i < input_size; i++) {
+        inStream << input[i];
+    }
+}
+
+static void write_output(uint8_t* output, hls::stream<uintV_t>& outStream, hls::stream<bool>& outStream_eos,  uint32_t input_size, uint32_t new_size)
+{
+    std::cout << "write_output input_size: " << std::to_string(input_size) << " new_size: " << std::to_string(new_size) << std::endl;
+    ((uint32_t *)output)[0] = input_size;
+    uint32_t outCnt = 0;
+    for (bool outEoS = outStream_eos.read(); outEoS == 0; outEoS = outStream_eos.read()) {
+        // reading value from output stream
+        uintV_t o = outStream.read();
+
+        // writing to output array
+        if (outCnt + MULTIPLE_BYTES < new_size) {
+            ((uintV_t *)output)[4 + outCnt / MULTIPLE_BYTES] = o;
+            outCnt += MULTIPLE_BYTES;
+        } else {
+            ((uintV_t *)output)[4 + outCnt / MULTIPLE_BYTES] = o;
+            outCnt = new_size;
+        }
+
+    }
+    uintV_t o = outStream.read();
+
+    // // the first 4 bytes are the size
+    // for (int i = 0; i < new_size; i++) {
+    //     output[4+i] = outStream.read();
+    //     eos_flag = outStream_eos.read();
+    // }
+}
+
+
+uint32_t snappy_compress(uint8_t *base, unsigned long input_offset, unsigned long output_offset, unsigned long input_size)
 {
 #pragma HLS INTERFACE m_axi port=base offset=off bundle=gmem depth=4194304
+#pragma HLS interface ap_ctrl_hs port=return
+    // std::cout << "snappy_compress" << std::endl;
     // offset output
     uint8_t *input = base + input_offset;
 	uint8_t *output = base + output_offset;
 
-    hls::stream<uintV_t> byte_in("compressIn");
-    hls::stream<bool> byte_in_eos("compressIn_eos");
-    hls::stream<uintV_t> byte_out("compressOut");
-    hls::stream<bool> byte_out_eos("compressOut_eos");
-    hls::stream<uint32_t> byte_out_size("compressOut_size");
+    hls::stream<uintV_t> inStream("compressIn");
+    hls::stream<uintV_t> outStream("compressOut");
+    hls::stream<bool> outStream_eos("compressOut_eos");
+    hls::stream<uint32_t> outStream_size("compressOut_size");
     uint32_t max_lit_limit[PARALLEL_BLOCK];
     uint32_t core_idx;
 
-    // read data from input array to input stream byte_in
-    read_input(input, byte_in, byte_in_eos, size);
+    // read data from input array to input stream inStream
+    read_input(input, inStream, input_size);
     // compression
-    snappyCompressEngineRun(byte_in, byte_out, byte_out_eos, byte_out_size, max_lit_limit, size, 0);
+    snappyCompressEngineRun(inStream, outStream, outStream_eos, outStream_size, max_lit_limit, input_size, 0);
     // write data from stream to output array
-    unsigned long new_size = byte_out_size.read();
-    write_output(output, byte_out, byte_out_eos, byte_out_size);
-    while(!byte_in_eos.read()) {
+    uint32_t new_size = outStream_size.read();
+    write_output(output, outStream, outStream_eos, input_size, new_size);
+
+    // read outStream to avoid this --- WARNING: Hls::stream 'compressOut' contains leftover data, which may result in RTL simulation hanging.
+    uintV_t temp = outStream.read();
+    // output[0] = '1';
+    // output[1] = '1';
+    // output[2] = '2';
+    // output[3] = '2';
+    // output[4] = '3';
+    // output[5] = '3';
+    // input[0] = '3';
+    // input[1] = '3';
+    // input[2] = '2';
+    // input[3] = '2';
+    // input[4] = '1';
+    // input[5] = '1';
+    return new_size;
+}
+
+uint32_t read_file(char *filename, char *array)
+{
+    std::fstream inputFile;
+    inputFile.open(filename, std::fstream::binary | std::fstream::in);
+    if (!inputFile.is_open()) {
+        std::cout << "Cannot open the input file!!" << std::endl;
+        exit(0);
     }
-    // read byte_out to avoid this --- WARNING: Hls::stream 'compressOut' contains leftover data, which may result in RTL simulation hanging.
-    uintV_t temp = byte_out.read();
-    output[0] = '1';
-    output[1] = '1';
-    output[2] = '2';
-    output[3] = '2';
-    output[4] = '3';
-    output[5] = '3';
-    input[0] = '3';
-    input[1] = '3';
-    input[2] = '2';
-    input[3] = '2';
-    input[4] = '1';
-    input[5] = '1';
+    inputFile.seekg(0, std::ios::end); // reaching to end of file
+    uint32_t file_length = (uint32_t)inputFile.tellg();
+    inputFile.seekg(0, std::ios::beg);
+    for (int i = 0; i < file_length; i += MULTIPLE_BYTES) {
+        uintV_t x;
+        inputFile.read((char*)&x, MULTIPLE_BYTES);
+        ((uintV_t *)array)[i] = x;
+    }
+    inputFile.close();
+    // // for testing
+    // std::cout << "read_file: " << std::to_string(file_length) << std::endl;
+    // for (int i = 0; i < file_length; i++) {
+    //     std::cout << array[i];
+    // }
+    // std::cout << std::endl;
+    return file_length;
+}
+
+void write_file(char *filename, char *array, uint32_t size)
+{
+    std::ofstream outFile;
+    outFile.open(filename, std::fstream::binary | std::fstream::out);
+    uint32_t outCnt = 0;
+    for (outCnt = 0; outCnt + MULTIPLE_BYTES < size; outCnt += MULTIPLE_BYTES) {
+        uintV_t o = ((uintV_t *)array)[outCnt / MULTIPLE_BYTES];
+        outFile.write((char*)&o, MULTIPLE_BYTES);
+    }
+    uintV_t o = ((uintV_t *)array)[outCnt / MULTIPLE_BYTES];
+    outFile.write((char*)&o, size - outCnt);
+    outFile.close();
 }
 
 int main(int argc, char* argv[]) {
-    const char *text =
-        "To evaluate our prefetcher we modelled the system using the gem5 simulator [4] in full system mode with the setup "
-        "given in table 2 and the ARMv8 64-bit instruction set. Our applications are derived from existing benchmarks and "
-        "libraries for graph traversal, using a range of graph sizes and characteristics. We simulate the core breadth-first search "
-        "based kernels of each benchmark, skipping the graph construction phase. Our first benchmark is from the Graph 500 community [32]. "
-        "We used their Kronecker graph generator for both the standard Graph 500 search benchmark and a connected components "
-        "calculation. The Graph 500 benchmark is designed to represent data analytics workloads, such as 3D physics "
-        "simulation. Standard inputs are too long to simulate, so we create smaller graphs with scales from 16 to 21 and edge "
-        "factors from 5 to 15 (for comparison, the Graph 500 toy input has scale 26 and edge factor 16). "
-        "Our prefetcher is most easily incorporated into libraries that implement graph traversal for CSR graphs. To this "
-        "end, we use the Boost Graph Library (BGL) [41], a C++ templated library supporting many graph-based algorithms "
-        "and graph data structures. To support our prefetcher, we added configuration instructions on constructors for CSR "
-        "data structures, circular buffer queues (serving as the work list) and colour vectors (serving as the visited list). This "
-        "means that any algorithm incorporating breadth-first searches on CSR graphs gains the benefits of our prefetcher without "
-        "further modification. We evaluate breadth-first search, betweenness centrality and ST connectivity which all traverse "
-        "graphs in this manner. To evaluate our extensions for sequential access prefetching (section 3.5) we use PageRank "
-        "and sequential colouring. Inputs to the BGL algorithms are a set of real world "
-        "graphs obtained from the SNAP dataset [25] chosen to represent a variety of sizes and disciplines, as shown in table 4. "
-        "All are smaller than what we might expect to be processing in a real system, to enable complete simulation in a realistic "
-        "time-frame, but as figure 2(a) shows, since stall rates go up for larger data structures, we expect the improvements we "
-        "attain in simulation to be conservative when compared with real-world use cases.";
-
-    size_t size = strlen(text);
-    printf("size:%d\n", size);
-
     char *buf = (char *)malloc(3 * 1024 * 1024); // 3MB buffer
-    memcpy(buf, (const uint8_t *)text, size);    // copy to internal buff
     char *input = buf;
-    char *compressed = buf + 1048576;
-    int j = 0;
-    std::cout << std::endl
-         << "before compression: " << std::endl
-         << std::endl;
-    for (j = 0; j < size; j++)
-    {
-        std::cout << input[j];
-    }
-    std::cout << std::endl
-         << std::endl;
+    char *output = buf + 1024 * 1024;
 
-    unsigned long new_size = size;
-    snappy_compress((uint8_t *)input, input - input, compressed - input, size);
-
-    std::cout << std::endl
-         << "after compression:" << std::endl
-         << std::endl;
-    for (j = 0; j < size; j++)
-    {
-        std::cout << input[j];
-    }
-    std::cout << std::endl
-         << std::endl;
-
-    for (j = 0; j < new_size; j++)
-    {
-        std::cout << compressed[j];
-    }
-    std::cout << std::endl
-         << std::endl;
+    // compressed file to array
+    uint32_t input_size = read_file(argv[1], input);
+    // DECOMPRESSION CALL
+    uint32_t new_size = snappy_compress((uint8_t *)buf, input - buf, output - buf, input_size);
+    // std::cout << "new_size: " << std::to_string(new_size) << std::endl;
+    // array to decompressed file
+    write_file(argv[2], output, new_size);
 }

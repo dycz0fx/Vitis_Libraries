@@ -219,8 +219,10 @@ setup: | check_part
 	@echo "----"
 
 runhls: setup | check_vivado
-	vivado_hls -f run_hls.tcl;
+#	vivado_hls -f run_hls.tcl;
+	echo 1;
 
 clean:
-	rm -rf *.prj *_hls.log settings.tcl
+#	rm -rf *.prj *_hls.log settings.tcl
+	rm -rf *.prj *_hls.log
 
