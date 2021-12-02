@@ -90,9 +90,32 @@ static void read_input_xilinx(uint8_t* input, hls::stream<uintV_t>& inStream, un
     }
 }
 
-static void write_output_xilinx(uint8_t* output, hls::stream<uintV_t>& outStream, hls::stream<bool>& outStream_eos, uint32_t new_size)
+static void write_output_xilinx(uint8_t* output, hls::stream<uintV_t>& outStream, hls::stream<bool>& outStream_eos, uint32_t input_size, uint32_t new_size)
 {
-    xf::common::utils_hw::streamToAxi<8>((ap_uint<8> *)output, outStream, outStream_eos);
+    output[0] = 0xff;
+    output[1] = 0x06;
+    output[2] = 0x00;
+    output[3] = 0x00;
+    output[4] = 0x73;
+    output[5] = 0x4e;
+    output[6] = 0x61;
+    output[7] = 0x50;
+    output[8] = 0x70;
+    output[9] = 0x59;
+    output[10] = 0x00;
+    output[11] = 0x65;
+    output[12] = 0x02;
+    output[13] = 0x00;
+    output[14] = 0x00;
+    output[15] = 0x00;
+    output[16] = 0x00;
+    output[17] = 0x00;
+
+    // uint64_t *uncompressed_length_ptr = (uint64_t *)(output + 10);
+    // *uncompressed_length_ptr = input_size;
+    uint8_t *start = output + 18;
+    // uint8_t *start = output;
+    xf::common::utils_hw::streamToAxi<8>((ap_uint<8> *)start, outStream, outStream_eos);
 }
 
 static void read_input(uint8_t* input, hls::stream<uintV_t>& inStream, unsigned long input_size) 
@@ -106,7 +129,27 @@ static void read_input(uint8_t* input, hls::stream<uintV_t>& inStream, unsigned 
 static void write_output(uint8_t* output, hls::stream<uintV_t>& outStream, hls::stream<bool>& outStream_eos,  uint32_t input_size, uint32_t new_size)
 {
     std::cout << "write_output input_size: " << std::to_string(input_size) << " new_size: " << std::to_string(new_size) << std::endl;
-    ((uint32_t *)output)[0] = input_size;
+    output[0] = 0xff;
+    output[1] = 0x06;
+    output[2] = 0x00;
+    output[3] = 0x00;
+    output[4] = 0x73;
+    output[5] = 0x4e;
+    output[6] = 0x61;
+    output[7] = 0x50;
+    output[8] = 0x70;
+    output[9] = 0x59;
+    output[10] = 0x00;
+    output[11] = 0x65;
+    output[12] = 0x02;
+    output[13] = 0x00;
+    output[14] = 0x00;
+    output[15] = 0x00;
+    output[16] = 0x00;
+    output[17] = 0x00;
+
+    // uint64_t *uncompressed_length_ptr = (uint64_t *)(output + 10);
+    // *uncompressed_length_ptr = input_size;
     uint32_t outCnt = 0;
     for (bool outEoS = outStream_eos.read(); outEoS == 0; outEoS = outStream_eos.read()) {
         // reading value from output stream
@@ -114,13 +157,12 @@ static void write_output(uint8_t* output, hls::stream<uintV_t>& outStream, hls::
 
         // writing to output array
         if (outCnt + MULTIPLE_BYTES < new_size) {
-            ((uintV_t *)output)[4 + outCnt / MULTIPLE_BYTES] = o;
+            ((uintV_t *)output)[18 + outCnt / MULTIPLE_BYTES] = o;
             outCnt += MULTIPLE_BYTES;
         } else {
-            ((uintV_t *)output)[4 + outCnt / MULTIPLE_BYTES] = o;
+            ((uintV_t *)output)[18 + outCnt / MULTIPLE_BYTES] = o;
             outCnt = new_size;
         }
-
     }
     uintV_t o = outStream.read();
 
@@ -154,7 +196,8 @@ uint32_t snappy_compress(uint8_t *base, unsigned long input_offset, unsigned lon
     snappyCompressEngineRun(inStream, outStream, outStream_eos, outStream_size, max_lit_limit, input_size, 0);
     // write data from stream to output array
     uint32_t new_size = outStream_size.read();
-    write_output(output, outStream, outStream_eos, input_size, new_size);
+    std::cout << "new_size: " << std::to_string(new_size) << std::endl;
+    write_output_xilinx(output, outStream, outStream_eos, input_size, new_size);
 
     // read outStream to avoid this --- WARNING: Hls::stream 'compressOut' contains leftover data, which may result in RTL simulation hanging.
     uintV_t temp = outStream.read();
@@ -170,6 +213,8 @@ uint32_t snappy_compress(uint8_t *base, unsigned long input_offset, unsigned lon
     // input[3] = '2';
     // input[4] = '1';
     // input[5] = '1';
+    // the header of snappy
+    new_size += 18;
     return new_size;
 }
 
@@ -201,6 +246,7 @@ uint32_t read_file(char *filename, char *array)
 
 void write_file(char *filename, char *array, uint32_t size)
 {
+    std::cout << "write_file " << std::to_string(size) << std::endl;
     std::ofstream outFile;
     outFile.open(filename, std::fstream::binary | std::fstream::out);
     uint32_t outCnt = 0;
