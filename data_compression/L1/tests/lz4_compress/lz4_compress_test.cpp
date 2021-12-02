@@ -151,7 +151,7 @@ uint32_t lz4_compress(uint8_t *base, unsigned long input_offset, unsigned long o
     lz4CompressEngineRun(inStream, outStream, outStream_eos, outStream_size, max_lit_limit, input_size, 0);
     // write data from stream to output array
     uint32_t new_size = outStream_size.read();
-    std::cout << "new_size: " << std::to_string(new_size) << std::endl;
+    // std::cout << "new_size: " << std::to_string(new_size) << std::endl;
     write_output(output, outStream, outStream_eos, input_size, new_size);
 
     // output[0] = '1';
