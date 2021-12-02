@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "/proj/gw/Xilinx/Vivado/2019.2/include/gmp.h"
 #include "hls_stream.h"
 #include <ap_int.h>
 #include <fstream>
@@ -28,8 +29,13 @@
 #include "lz_compress.hpp"
 #include "lz_optional.hpp"
 
+#include "axi_to_stream.hpp"
+#include "stream_to_axi.hpp"
+
+#define MULTIPLE_BYTES 1
+
 #define MAX_LIT_COUNT 4096
-#define PARALLEL_BLOCK 1
+#define NUM_PARALLEL_BLOCK 1
 #define LZ_MAX_OFFSET_LIMIT 65536
 #define OFFSET_WINDOW (64 * 1024)
 #define MAX_MATCH_LEN 255
@@ -48,7 +54,7 @@ void lz4CompressEngineRun(hls::stream<uintV_t>& inStream,
                           hls::stream<uintV_t>& lz4Out,
                           hls::stream<bool>& lz4Out_eos,
                           hls::stream<uint32_t>& lz4OutSize,
-                          uint32_t max_lit_limit[PARALLEL_BLOCK],
+                          uint32_t max_lit_limit[NUM_PARALLEL_BLOCK],
                           uint32_t input_size,
                           uint32_t core_idx) {
     hls::stream<compressd_dt> compressdStream("compressdStream");
@@ -67,68 +73,155 @@ void lz4CompressEngineRun(hls::stream<uintV_t>& inStream,
         inStream, compressdStream, input_size);
     xf::compression::lzBestMatchFilter<MATCH_LEN, OFFSET_WINDOW>(compressdStream, bestMatchStream, input_size);
     xf::compression::lzBooster<MAX_MATCH_LEN>(bestMatchStream, boosterStream, input_size);
-    xf::compression::lz4Compress<MAX_LIT_COUNT, PARALLEL_BLOCK>(boosterStream, lz4Out, max_lit_limit, input_size,
+    xf::compression::lz4Compress<MAX_LIT_COUNT, NUM_PARALLEL_BLOCK>(boosterStream, lz4Out, max_lit_limit, input_size,
                                                                 lz4Out_eos, lz4OutSize, core_idx);
 }
 
-int main(int argc, char* argv[]) {
-    hls::stream<uintV_t> bytestr_in("compressIn");
-    hls::stream<uintV_t> bytestr_out("compressOut");
+static void read_input_xilinx(uint8_t* input, hls::stream<uintV_t>& inStream, unsigned long input_size) 
+{
+    hls::stream<bool> inStream_eos("compressIn_eos");
+    xf::common::utils_hw::axiToStream<8>((ap_uint<8> *)input, input_size, inStream, inStream_eos);
+    while(!inStream_eos.read()) {
+    }
+}
 
-    hls::stream<bool> lz4Out_eos;
-    hls::stream<uint32_t> lz4OutSize;
-    uint32_t max_lit_limit[PARALLEL_BLOCK];
-    uint32_t input_size;
+static void write_output_xilinx(uint8_t* output, hls::stream<uintV_t>& outStream, hls::stream<bool>& outStream_eos, uint32_t input_size, uint32_t new_size)
+{
+    *((uint32_t *)output) = input_size;
+    uint8_t* start = output + 4;
+    xf::common::utils_hw::streamToAxi<8>((ap_uint<8> *)start, outStream, outStream_eos);
+    uintV_t o = outStream.read();
+}
+
+static void read_input(uint8_t* input, hls::stream<uintV_t>& inStream, unsigned long input_size) 
+{
+    // std::cout << "read_input: " << std::to_string(input_size) << std::endl;
+    for (int i = 0; i < input_size; i++) {
+        inStream << input[i];
+    }
+}
+
+static void write_output(uint8_t* output, hls::stream<uintV_t>& outStream, hls::stream<bool>& outStream_eos,  uint32_t input_size, uint32_t new_size)
+{
+    // std::cout << "write_output input_size: " << std::to_string(input_size) << " new_size: " << std::to_string(new_size) << std::endl;
+    *((uint32_t *)output) = input_size;
+    uint32_t outCnt = 0;
+    for (bool outEoS = outStream_eos.read(); outEoS == 0; outEoS = outStream_eos.read()) {
+        // reading value from output stream
+        uintV_t o = outStream.read();
+
+        // writing to output array
+        if (outCnt + MULTIPLE_BYTES < new_size) {
+            ((uintV_t *)output)[4 + outCnt / MULTIPLE_BYTES] = o;
+            outCnt += MULTIPLE_BYTES;
+        } else {
+            ((uintV_t *)output)[4 + outCnt / MULTIPLE_BYTES] = o;
+            outCnt = new_size;
+        }
+    }
+    // read outStream to avoid this --- WARNING: Hls::stream 'compressOut' contains leftover data, which may result in RTL simulation hanging.
+    uintV_t o = outStream.read();
+
+    // // the first 4 bytes are the size
+    // for (int i = 0; i < new_size; i++) {
+    //     output[4+i] = outStream.read();
+    //     eos_flag = outStream_eos.read();
+    // }
+}
+
+uint32_t lz4_compress(uint8_t *base, unsigned long input_offset, unsigned long output_offset, unsigned long input_size)
+{
+#pragma HLS INTERFACE m_axi port=base offset=off bundle=gmem depth=4194304
+#pragma HLS interface ap_ctrl_hs port=return
+    // std::cout << "lz4_compress" << std::endl;
+    // offset output
+    uint8_t *input = base + input_offset;
+	uint8_t *output = base + output_offset;
+
+    hls::stream<uintV_t> inStream("compressIn");
+    hls::stream<uintV_t> outStream("compressOut");
+    hls::stream<bool> outStream_eos("compressOut_eos");
+    hls::stream<uint32_t> outStream_size("compressOut_size");
+    uint32_t max_lit_limit[NUM_PARALLEL_BLOCK];
     uint32_t core_idx;
 
-    std::ifstream inputFile;
-    std::fstream outputFile;
+    // read data from input array to input stream inStream
+    read_input(input, inStream, input_size);
+    // compression
+    lz4CompressEngineRun(inStream, outStream, outStream_eos, outStream_size, max_lit_limit, input_size, 0);
+    // write data from stream to output array
+    uint32_t new_size = outStream_size.read();
+    std::cout << "new_size: " << std::to_string(new_size) << std::endl;
+    write_output(output, outStream, outStream_eos, input_size, new_size);
 
-    // Input file open for input_size
-    inputFile.open(argv[1], std::ofstream::binary | std::ofstream::in);
+    // output[0] = '1';
+    // output[1] = '1';
+    // output[2] = '2';
+    // output[3] = '2';
+    // output[4] = '3';
+    // output[5] = '3';
+    // input[0] = '3';
+    // input[1] = '3';
+    // input[2] = '2';
+    // input[3] = '2';
+    // input[4] = '1';
+    // input[5] = '1';
+    // the header of snappy
+    uint32_t array_size = new_size + 4;
+    return array_size;
+}
+
+uint32_t read_file(char *filename, char *array)
+{
+    std::fstream inputFile;
+    inputFile.open(filename, std::fstream::binary | std::fstream::in);
     if (!inputFile.is_open()) {
         std::cout << "Cannot open the input file!!" << std::endl;
         exit(0);
     }
-    inputFile.seekg(0, std::ios::end);
-    uint32_t fileSize = inputFile.tellg();
+    inputFile.seekg(0, std::ios::end); // reaching to end of file
+    uint32_t file_length = (uint32_t)inputFile.tellg();
     inputFile.seekg(0, std::ios::beg);
-    input_size = fileSize;
-    uint32_t p = fileSize;
-
-    // Pushing input file into input stream for compression
-    while (p--) {
-        uint8_t x;
-        inputFile.read((char*)&x, 1);
-        bytestr_in << x;
+    for (int i = 0; i < file_length; i += MULTIPLE_BYTES) {
+        uintV_t x;
+        inputFile.read((char*)&x, MULTIPLE_BYTES);
+        ((uintV_t *)array)[i] = x;
     }
     inputFile.close();
+    // // for testing
+    // std::cout << "read_file: " << std::to_string(file_length) << std::endl;
+    // for (int i = 0; i < file_length; i++) {
+    //     std::cout << array[i];
+    // }
+    // std::cout << std::endl;
+    return file_length;
+}
 
-    // COMPRESSION CALL
-    lz4CompressEngineRun(bytestr_in, bytestr_out, lz4Out_eos, lz4OutSize, max_lit_limit, input_size, 0);
-
-    uint32_t outsize;
-    outsize = lz4OutSize.read();
-    std::cout << "------- Compression Ratio: " << (float)fileSize / outsize << " -------" << std::endl;
-
-    outputFile.open(argv[2], std::fstream::binary | std::fstream::out);
-    if (!outputFile.is_open()) {
-        std::cout << "Cannot open the output file!!" << std::endl;
-        exit(0);
+void write_file(char *filename, char *array, uint32_t size)
+{
+    // std::cout << "write_file " << std::to_string(size) << std::endl;
+    std::ofstream outFile;
+    outFile.open(filename, std::fstream::binary | std::fstream::out);
+    uint32_t outCnt = 0;
+    for (outCnt = 0; outCnt + MULTIPLE_BYTES < size; outCnt += MULTIPLE_BYTES) {
+        uintV_t o = ((uintV_t *)array)[outCnt / MULTIPLE_BYTES];
+        outFile.write((char*)&o, MULTIPLE_BYTES);
     }
+    uintV_t o = ((uintV_t *)array)[outCnt / MULTIPLE_BYTES];
+    outFile.write((char*)&o, size - outCnt);
+    outFile.close();
+}
 
-    outputFile.write((char*)&input_size, 4);
+int main(int argc, char* argv[]) {
+    char *buf = (char *)malloc(3 * 1024 * 1024); // 3MB buffer
+    char *input = buf;
+    char *output = buf + 1024 * 1024;
 
-    bool eos_flag = lz4Out_eos.read();
-    while (outsize > 0) {
-        while (!eos_flag) {
-            uint8_t w = bytestr_out.read();
-            eos_flag = lz4Out_eos.read();
-            outputFile.write((char*)&w, 1);
-            outsize--;
-        }
-        if (!eos_flag) outsize = lz4OutSize.read();
-    }
-    uint8_t w = bytestr_out.read();
-    outputFile.close();
+    // compressed file to array
+    uint32_t input_size = read_file(argv[1], input);
+    // DECOMPRESSION CALL
+    uint32_t array_size = lz4_compress((uint8_t *)buf, input - buf, output - buf, input_size);
+    // std::cout << "array_size: " << std::to_string(array_size) << std::endl;
+    // array to decompressed file
+    write_file(argv[2], output, array_size);
 }

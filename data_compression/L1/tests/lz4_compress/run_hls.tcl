@@ -25,9 +25,9 @@ if {![info exists CLKP]} {
 
 open_project -reset $PROJ
 
-add_files "lz4_compress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw"
-add_files -tb "lz4_compress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw"
-set_top lz4CompressEngineRun
+add_files "lz4_compress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -I${UTILS_ROOT}/L1/include/xf_utils_hw -I${UTILS_ROOT}/L1/include"
+add_files -tb "lz4_compress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -I${UTILS_ROOT}/L1/include/xf_utils_hw -I${UTILS_ROOT}/L1/include"
+set_top lz4_compress
 
 open_solution -reset $SOLN
 
@@ -54,6 +54,10 @@ if {$VIVADO_SYN == 1} {
 
 if {$VIVADO_IMPL == 1} {
   export_design -flow impl -rtl verilog
+}
+
+if {$EXPORT_ZIP == 1} {
+  export_design -rtl verilog -format ip_catalog -vendor "PL" -display_name "lz4_compress" -taxonomy "/hls" -output ./lz4_compress.zip
 }
 
 exit

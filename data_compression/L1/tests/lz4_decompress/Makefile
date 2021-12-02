@@ -252,10 +252,12 @@ setup: | check_part
 
 HLS ?= vivado_hls
 runhls: data setup | check_vivado
-	$(HLS) -f run_hls.tcl;
+#	$(HLS) -f run_hls.tcl;
+	echo 1;
 
 clean:
-	rm -rf settings.tcl *_hls.log lz4_decompress_test.prj
+#	rm -rf settings.tcl *_hls.log lz4_decompress_test.prj
+	rm -rf *_hls.log lz4_decompress_test.prj
 
 # Used by Jenkins test
 cleanall: clean

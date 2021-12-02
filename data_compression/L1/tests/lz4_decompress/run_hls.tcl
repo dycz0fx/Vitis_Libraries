@@ -25,9 +25,9 @@ if {![info exists CLKP]} {
 
 open_project -reset $PROJ
 
-add_files "lz4_decompress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw"
-add_files -tb "lz4_decompress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw"
-set_top lz4DecompressEngineRun
+add_files "lz4_decompress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -I${UTILS_ROOT}/L1/include/xf_utils_hw -I${UTILS_ROOT}/L1/include"
+add_files -tb "lz4_decompress_test.cpp" -cflags "-I${XF_PROJ_ROOT}/L1/include/hw -I${UTILS_ROOT}/L1/include/xf_utils_hw -I${UTILS_ROOT}/L1/include"
+set_top lz4_decompress
 
 open_solution -reset $SOLN
 
@@ -37,7 +37,7 @@ set_part $XPART
 create_clock -period $CLKP
 
 if {$CSIM == 1} {
-  csim_design -argv "${XF_PROJ_ROOT}/L1/tests/lz4_decompress/sample.txt.encoded ${XF_PROJ_ROOT}/L1/tests/lz4_decompress/sample.txt"
+  csim_design -argv "${XF_PROJ_ROOT}/L1/tests/lz4_compress/sample.txt.encoded ${XF_PROJ_ROOT}/L1/tests/lz4_decompress/sample.out ${XF_PROJ_ROOT}/L1/tests/lz4_decompress/sample.txt"
 }
 
 if {$CSYNTH == 1} {
@@ -45,7 +45,7 @@ if {$CSYNTH == 1} {
 }
 
 if {$COSIM == 1} {
-  cosim_design -argv "${XF_PROJ_ROOT}/L1/tests/lz4_decompress/sample.txt.encoded ${XF_PROJ_ROOT}/L1/tests/lz4_decompress/sample.txt"
+  cosim_design -argv "${XF_PROJ_ROOT}/L1/tests/lz4_compress/sample.txt.encoded ${XF_PROJ_ROOT}/L1/tests/lz4_decompress/sample.out ${XF_PROJ_ROOT}/L1/tests/lz4_decompress/sample.txt"
 }
 
 if {$VIVADO_SYN == 1} {
@@ -54,6 +54,10 @@ if {$VIVADO_SYN == 1} {
 
 if {$VIVADO_IMPL == 1} {
   export_design -flow impl -rtl verilog
+}
+
+if {$EXPORT_ZIP == 1} {
+  export_design -rtl verilog -format ip_catalog -vendor "PL" -display_name "lz4_decompress" -taxonomy "/hls" -output ./lz4_decompress.zip
 }
 
 exit

@@ -1,0 +1,10 @@
+set XPART xcvu9p-flga2104-2-i
+set CSIM 1
+set CSYNTH 0
+set COSIM 0
+set VIVADO_SYN 0
+set VIVADO_IMPL 0
+set EXPORT_ZIP 0
+set XF_PROJ_ROOT "/misc/gw/home/luoxi/Programs/Vitis_Libraries_19.2/data_compression/"
+set CUR_DIR "/misc/gw/home/luoxi/Programs/Vitis_Libraries_19.2/data_compression/L1/tests/lz4_compress"
+set UTILS_ROOT "/misc/gw/home/luoxi/Programs/Vitis_Libraries_19.2/utils/"
