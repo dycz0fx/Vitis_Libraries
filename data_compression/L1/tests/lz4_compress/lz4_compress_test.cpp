@@ -68,7 +68,6 @@ void lz4CompressEngineRun(hls::stream<uintV_t>& inStream,
 #pragma HLS RESOURCE variable = compressdStream core = FIFO_SRL
 #pragma HLS RESOURCE variable = boosterStream core = FIFO_SRL
 
-#pragma HLS dataflow
     xf::compression::lzCompress<MATCH_LEN, c_minMatch, LZ_MAX_OFFSET_LIMIT, c_matchLevel, c_minOffset>(
         inStream, compressdStream, input_size);
     xf::compression::lzBestMatchFilter<MATCH_LEN, OFFSET_WINDOW>(compressdStream, bestMatchStream, input_size);
@@ -129,46 +128,50 @@ static void write_output(uint8_t* output, hls::stream<uintV_t>& outStream, hls::
     // }
 }
 
-uint32_t lz4_compress(uint8_t *base, unsigned long input_offset, unsigned long output_offset, unsigned long input_size)
+uint32_t lz4_compress(uint8_t *input, uint8_t *output, unsigned long input_size)
 {
-#pragma HLS INTERFACE m_axi port=base offset=off bundle=gmem depth=4194304
+#pragma HLS INTERFACE m_axi port=input offset=off bundle=gmem depth=1048576
+#pragma HLS INTERFACE m_axi port=output offset=off bundle=gmem depth=1048576
 #pragma HLS interface ap_ctrl_hs port=return
     // std::cout << "lz4_compress" << std::endl;
     // offset output
-    uint8_t *input = base + input_offset;
-	uint8_t *output = base + output_offset;
 
-    hls::stream<uintV_t> inStream("compressIn");
-    hls::stream<uintV_t> outStream("compressOut");
-    hls::stream<bool> outStream_eos("compressOut_eos");
-    hls::stream<uint32_t> outStream_size("compressOut_size");
-    uint32_t max_lit_limit[NUM_PARALLEL_BLOCK];
-    uint32_t core_idx;
+    // NOOP... just copy in to out
+    memcpy(output, (const uint8_t*)input, input_size);
+	return input_size;
 
-    // read data from input array to input stream inStream
-    read_input(input, inStream, input_size);
-    // compression
-    lz4CompressEngineRun(inStream, outStream, outStream_eos, outStream_size, max_lit_limit, input_size, 0);
-    // write data from stream to output array
-    uint32_t new_size = outStream_size.read();
-    // std::cout << "new_size: " << std::to_string(new_size) << std::endl;
-    write_output(output, outStream, outStream_eos, input_size, new_size);
+//     hls::stream<uintV_t> inStream("compressIn");
+//     hls::stream<uintV_t> outStream("compressOut");
+//     hls::stream<bool> outStream_eos("compressOut_eos");
+//     hls::stream<uint32_t> outStream_size("compressOut_size");
+//     uint32_t max_lit_limit[NUM_PARALLEL_BLOCK];
+//     uint32_t core_idx;
 
-    // output[0] = '1';
-    // output[1] = '1';
-    // output[2] = '2';
-    // output[3] = '2';
-    // output[4] = '3';
-    // output[5] = '3';
-    // input[0] = '3';
-    // input[1] = '3';
-    // input[2] = '2';
-    // input[3] = '2';
-    // input[4] = '1';
-    // input[5] = '1';
-    // the header of snappy
-    uint32_t array_size = new_size + 4;
-    return array_size;
+// #pragma HLS dataflow
+//     // read data from input array to input stream inStream
+//     read_input(input, inStream, input_size);
+//     // compression
+//     lz4CompressEngineRun(inStream, outStream, outStream_eos, outStream_size, max_lit_limit, input_size, 0);
+//     // write data from stream to output array
+//     uint32_t new_size = outStream_size.read();
+//     // std::cout << "new_size: " << std::to_string(new_size) << std::endl;
+//     write_output(output, outStream, outStream_eos, input_size, new_size);
+
+//     // output[0] = '1';
+//     // output[1] = '1';
+//     // output[2] = '2';
+//     // output[3] = '2';
+//     // output[4] = '3';
+//     // output[5] = '3';
+//     // input[0] = '3';
+//     // input[1] = '3';
+//     // input[2] = '2';
+//     // input[3] = '2';
+//     // input[4] = '1';
+//     // input[5] = '1';
+//     // the header of snappy
+//     uint32_t array_size = new_size + 4;
+//     return array_size;
 }
 
 uint32_t read_file(char *filename, char *array)
@@ -213,15 +216,23 @@ void write_file(char *filename, char *array, uint32_t size)
 }
 
 int main(int argc, char* argv[]) {
-    char *buf = (char *)malloc(3 * 1024 * 1024); // 3MB buffer
+    char *buf = (char *)malloc(4 * 1024 * 1024); // 4MB buffer
     char *input = buf;
     char *output = buf + 1024 * 1024;
 
+    for (int i = 0; i < 1024; i++) {
+        input[i] = 'p';
+    }
+    u_int32_t input_size = 1024;
     // compressed file to array
-    uint32_t input_size = read_file(argv[1], input);
+    // uint32_t input_size = read_file(argv[1], input);
     // DECOMPRESSION CALL
-    uint32_t array_size = lz4_compress((uint8_t *)buf, input - buf, output - buf, input_size);
+    uint32_t array_size = lz4_compress((uint8_t *)input, (uint8_t *)output, input_size);
     // std::cout << "array_size: " << std::to_string(array_size) << std::endl;
     // array to decompressed file
-    write_file(argv[2], output, array_size);
+    // write_file(argv[2], output, array_size);
+    for (int i = 0; i < 1024; i++) {
+        std::cout << output[i];
+    }
+    std::cout << std::endl;
 }

@@ -1,7 +1,7 @@
 set XPART xcvu9p-flga2104-2-i
 set CSIM 1
 set CSYNTH 1
-set COSIM 0
+set COSIM 1
 set VIVADO_SYN 0
 set VIVADO_IMPL 0
 set EXPORT_ZIP 1
